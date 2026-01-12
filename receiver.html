@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>IPTV Cast Receiver</title>
+    <script src="//www.gstatic.com/cast/sdk/libs/caf_receiver/v3/cast_receiver_framework.js"></script>
+</head>
+<body>
+    <cast-media-player></cast-media-player>
+    <script>
+        const context = cast.framework.CastReceiverContext.getInstance();
+        const playerManager = context.getPlayerManager();
+
+        // Intercept LOAD requests to add headers
+        playerManager.setMessageInterceptor(
+            cast.framework.messages.MessageType.LOAD,
+            (loadRequestData) => {
+                // Add custom headers for IPTV
+                if (loadRequestData.media && loadRequestData.media.contentUrl) {
+                    // Extract User-Agent from URL if present
+                    const url = loadRequestData.media.contentUrl;
+                    if (url.includes('|User-Agent=')) {
+                        const [cleanUrl, headers] = url.split('|');
+                        loadRequestData.media.contentUrl = cleanUrl;
+                        
+                        // Parse headers
+                        const headerPairs = headers.split('|');
+                        loadRequestData.media.customData = loadRequestData.media.customData || {};
+                        loadRequestData.media.customData.headers = {};
+                        
+                        headerPairs.forEach(pair => {
+                            const [key, value] = pair.split('=');
+                            if (key && value) {
+                                loadRequestData.media.customData.headers[key] = value;
+                            }
+                        });
+                    }
+                }
+                return loadRequestData;
+            }
+        );
+
+        // Start the receiver
+        context.start({
+            maxInactivity: 3600, // 1 hour
+            supportedCommands: cast.framework.messages.Command.ALL_BASIC_MEDIA
+        });
+    </script>
+</body>
+</html>
