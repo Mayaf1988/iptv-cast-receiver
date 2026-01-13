@@ -2,6 +2,18 @@
 <html>
 <head>
     <title>IPTV Cast Receiver</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: #000;
+            overflow: hidden;
+        }
+        cast-media-player {
+            width: 100%;
+            height: 100%;
+        }
+    </style>
     <script src="//www.gstatic.com/cast/sdk/libs/caf_receiver/v3/cast_receiver_framework.js"></script>
 </head>
 <body>
@@ -10,40 +22,82 @@
         const context = cast.framework.CastReceiverContext.getInstance();
         const playerManager = context.getPlayerManager();
 
-        // Intercept LOAD requests to add headers
+        // Intercept LOAD requests to handle IPTV URLs
         playerManager.setMessageInterceptor(
             cast.framework.messages.MessageType.LOAD,
             (loadRequestData) => {
-                // Add custom headers for IPTV
+                console.log('Load request received:', loadRequestData);
+                
                 if (loadRequestData.media && loadRequestData.media.contentUrl) {
-                    // Extract User-Agent from URL if present
-                    const url = loadRequestData.media.contentUrl;
-                    if (url.includes('|User-Agent=')) {
-                        const [cleanUrl, headers] = url.split('|');
-                        loadRequestData.media.contentUrl = cleanUrl;
-                        
-                        // Parse headers
-                        const headerPairs = headers.split('|');
-                        loadRequestData.media.customData = loadRequestData.media.customData || {};
-                        loadRequestData.media.customData.headers = {};
-                        
-                        headerPairs.forEach(pair => {
-                            const [key, value] = pair.split('=');
-                            if (key && value) {
-                                loadRequestData.media.customData.headers[key] = value;
-                            }
-                        });
+                    let url = loadRequestData.media.contentUrl;
+                    console.log('Original URL:', url);
+                    
+                    // Handle URLs with pipe-separated headers (format: url|Header=Value)
+                    if (url.includes('|')) {
+                        const parts = url.split('|');
+                        url = parts[0]; // Clean URL without headers
+                        console.log('Cleaned URL (removed headers):', url);
+                    }
+                    
+                    // FIX: Handle .0.m3u8 or .0.ts format by removing the .0
+                    // Convert: streamId.0.m3u8 -> streamId.m3u8
+                    url = url.replace(/\.0\.(m3u8|ts)$/i, '.$1');
+                    console.log('Fixed URL (removed .0):', url);
+                    
+                    loadRequestData.media.contentUrl = url;
+                    
+                    // Set proper content type based on extension
+                    if (url.includes('.m3u8') || url.includes('m3u8')) {
+                        loadRequestData.media.contentType = 'application/x-mpegURL';
+                        console.log('Set content type: application/x-mpegURL');
+                    } else if (url.includes('.ts')) {
+                        loadRequestData.media.contentType = 'application/x-mpegURL'; // Still use HLS for .ts
+                        console.log('Set content type: application/x-mpegURL (for .ts)');
+                    } else if (url.includes('.mp4')) {
+                        loadRequestData.media.contentType = 'video/mp4';
+                        console.log('Set content type: video/mp4');
+                    } else {
+                        loadRequestData.media.contentType = 'application/x-mpegURL';
+                        console.log('Set default content type: application/x-mpegURL');
                     }
                 }
+                
+                console.log('Final load request:', loadRequestData);
                 return loadRequestData;
             }
         );
 
+        // Handle player errors
+        playerManager.addEventListener(
+            cast.framework.events.EventType.ERROR,
+            (event) => {
+                console.error('Player error:', event);
+            }
+        );
+
+        // Log playback state changes
+        playerManager.addEventListener(
+            cast.framework.events.EventType.PLAYER_LOAD_COMPLETE,
+            () => {
+                console.log('Player load complete');
+            }
+        );
+
+        playerManager.addEventListener(
+            cast.framework.events.EventType.PLAYING,
+            () => {
+                console.log('Playback started');
+            }
+        );
+
         // Start the receiver
-        context.start({
-            maxInactivity: 3600, // 1 hour
-            supportedCommands: cast.framework.messages.Command.ALL_BASIC_MEDIA
-        });
+        const options = new cast.framework.CastReceiverOptions();
+        options.maxInactivity = 3600;
+        options.disableIdleTimeout = false;
+        options.supportedCommands = cast.framework.messages.Command.ALL_BASIC_MEDIA;
+        
+        context.start(options);
+        console.log('Cast receiver started');
     </script>
 </body>
 </html>
