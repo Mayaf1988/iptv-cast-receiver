@@ -8,96 +8,196 @@
             padding: 0;
             background-color: #000;
             overflow: hidden;
+            font-family: Arial, sans-serif;
         }
         cast-media-player {
             width: 100%;
             height: 100%;
+        }
+        #debug {
+            position: fixed;
+            top: 20px;
+            left: 20px;
+            right: 20px;
+            background: rgba(0, 0, 0, 0.8);
+            color: #00ff00;
+            padding: 20px;
+            font-size: 24px;
+            border: 2px solid #00ff00;
+            border-radius: 10px;
+            z-index: 9999;
+            max-height: 80vh;
+            overflow-y: auto;
+            display: none;
+        }
+        #debug.show {
+            display: block;
+        }
+        .error {
+            color: #ff0000;
+            font-weight: bold;
+        }
+        .success {
+            color: #00ff00;
+        }
+        .info {
+            color: #00d9ff;
         }
     </style>
     <script src="//www.gstatic.com/cast/sdk/libs/caf_receiver/v3/cast_receiver_framework.js"></script>
 </head>
 <body>
     <cast-media-player></cast-media-player>
+    <div id="debug"></div>
+    
     <script>
+        // Visual debug logger
+        const debugDiv = document.getElementById('debug');
+        let debugMessages = [];
+        
+        function showDebug(message, type = 'info') {
+            const timestamp = new Date().toLocaleTimeString();
+            const className = type === 'error' ? 'error' : type === 'success' ? 'success' : 'info';
+            debugMessages.push(`<div class="${className}">[${timestamp}] ${message}</div>`);
+            
+            // Keep only last 10 messages
+            if (debugMessages.length > 10) {
+                debugMessages.shift();
+            }
+            
+            debugDiv.innerHTML = debugMessages.join('');
+            debugDiv.classList.add('show');
+            
+            // Auto-hide debug after 10 seconds if playing successfully
+            if (type === 'success') {
+                setTimeout(() => {
+                    debugDiv.classList.remove('show');
+                }, 10000);
+            }
+        }
+
         const context = cast.framework.CastReceiverContext.getInstance();
         const playerManager = context.getPlayerManager();
 
-        // Intercept LOAD requests to handle IPTV URLs
+        showDebug('Cast receiver starting...', 'info');
+
+        // Intercept LOAD requests
         playerManager.setMessageInterceptor(
             cast.framework.messages.MessageType.LOAD,
             (loadRequestData) => {
-                console.log('Load request received:', loadRequestData);
-                
-                if (loadRequestData.media && loadRequestData.media.contentUrl) {
-                    let url = loadRequestData.media.contentUrl;
-                    console.log('Original URL:', url);
+                try {
+                    showDebug('📥 Load request received', 'info');
                     
-                    // Handle URLs with pipe-separated headers (format: url|Header=Value)
-                    if (url.includes('|')) {
-                        const parts = url.split('|');
-                        url = parts[0]; // Clean URL without headers
-                        console.log('Cleaned URL (removed headers):', url);
+                    if (loadRequestData.media && loadRequestData.media.contentUrl) {
+                        let url = loadRequestData.media.contentUrl;
+                        showDebug(`Original URL: ${url.substring(0, 60)}...`, 'info');
+                        
+                        // Handle pipe-separated headers
+                        if (url.includes('|')) {
+                            const parts = url.split('|');
+                            url = parts[0];
+                            showDebug(`✂️ Removed headers, cleaned URL`, 'info');
+                        }
+                        
+                        // Remove .0 from extension
+                        const originalUrl = url;
+                        url = url.replace(/\.0\.(m3u8|ts)$/i, '.$1');
+                        
+                        if (originalUrl !== url) {
+                            showDebug(`✂️ Fixed .0 extension`, 'success');
+                            showDebug(`New URL: ${url.substring(url.length - 40)}`, 'info');
+                        }
+                        
+                        loadRequestData.media.contentUrl = url;
+                        
+                        // Set content type
+                        let contentType;
+                        if (url.includes('.m3u8')) {
+                            contentType = 'application/x-mpegURL';
+                            showDebug(`📝 Type: HLS (m3u8)`, 'info');
+                        } else if (url.includes('.ts')) {
+                            contentType = 'application/x-mpegURL';
+                            showDebug(`📝 Type: HLS (ts treated as HLS)`, 'info');
+                        } else if (url.includes('.mp4')) {
+                            contentType = 'video/mp4';
+                            showDebug(`📝 Type: MP4`, 'info');
+                        } else {
+                            contentType = 'application/x-mpegURL';
+                            showDebug(`📝 Type: Default HLS`, 'info');
+                        }
+                        
+                        loadRequestData.media.contentType = contentType;
+                        showDebug(`✅ Ready to load stream`, 'success');
                     }
                     
-                    // FIX: Handle .0.m3u8 or .0.ts format by removing the .0
-                    // Convert: streamId.0.m3u8 -> streamId.m3u8
-                    url = url.replace(/\.0\.(m3u8|ts)$/i, '.$1');
-                    console.log('Fixed URL (removed .0):', url);
+                    return loadRequestData;
                     
-                    loadRequestData.media.contentUrl = url;
-                    
-                    // Set proper content type based on extension
-                    if (url.includes('.m3u8') || url.includes('m3u8')) {
-                        loadRequestData.media.contentType = 'application/x-mpegURL';
-                        console.log('Set content type: application/x-mpegURL');
-                    } else if (url.includes('.ts')) {
-                        loadRequestData.media.contentType = 'application/x-mpegURL'; // Still use HLS for .ts
-                        console.log('Set content type: application/x-mpegURL (for .ts)');
-                    } else if (url.includes('.mp4')) {
-                        loadRequestData.media.contentType = 'video/mp4';
-                        console.log('Set content type: video/mp4');
-                    } else {
-                        loadRequestData.media.contentType = 'application/x-mpegURL';
-                        console.log('Set default content type: application/x-mpegURL');
-                    }
+                } catch (error) {
+                    showDebug(`❌ ERROR: ${error.message}`, 'error');
+                    return loadRequestData;
                 }
-                
-                console.log('Final load request:', loadRequestData);
-                return loadRequestData;
             }
         );
 
-        // Handle player errors
+        // Handle errors
         playerManager.addEventListener(
             cast.framework.events.EventType.ERROR,
             (event) => {
-                console.error('Player error:', event);
+                const errorCode = event.detailedErrorCode || event.error?.code || 'UNKNOWN';
+                const errorMsg = event.error?.message || 'Unknown error';
+                showDebug(`❌ PLAYER ERROR: ${errorCode}`, 'error');
+                showDebug(`Details: ${errorMsg}`, 'error');
+                
+                // Keep error visible
+                setTimeout(() => {
+                    debugDiv.classList.add('show');
+                }, 1000);
             }
         );
 
-        // Log playback state changes
+        // Load complete
         playerManager.addEventListener(
             cast.framework.events.EventType.PLAYER_LOAD_COMPLETE,
             () => {
-                console.log('Player load complete');
+                showDebug(`✅ Stream loaded successfully!`, 'success');
             }
         );
 
+        // Playing
         playerManager.addEventListener(
             cast.framework.events.EventType.PLAYING,
             () => {
-                console.log('Playback started');
+                showDebug(`▶️ Playback started!`, 'success');
+                // Hide debug after 5 seconds of successful playback
+                setTimeout(() => {
+                    debugDiv.classList.remove('show');
+                }, 5000);
             }
         );
 
-        // Start the receiver
+        // Buffering
+        playerManager.addEventListener(
+            cast.framework.events.EventType.BUFFERING,
+            () => {
+                showDebug(`⏳ Buffering...`, 'info');
+            }
+        );
+
+        // Start receiver
         const options = new cast.framework.CastReceiverOptions();
         options.maxInactivity = 3600;
         options.disableIdleTimeout = false;
         options.supportedCommands = cast.framework.messages.Command.ALL_BASIC_MEDIA;
         
         context.start(options);
-        console.log('Cast receiver started');
+        showDebug(`✅ Receiver ready!`, 'success');
+        
+        // Hide initial message after 3 seconds
+        setTimeout(() => {
+            if (debugMessages.length <= 2) {
+                debugDiv.classList.remove('show');
+            }
+        }, 3000);
     </script>
 </body>
 </html>
