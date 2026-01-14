@@ -7,226 +7,23 @@
             margin: 0;
             padding: 0;
             background-color: #000;
-            overflow: hidden;
-            font-family: Arial, sans-serif;
         }
         cast-media-player {
             width: 100%;
             height: 100%;
         }
-        #debug-overlay {
-            position: fixed;
-            top: 20px;
-            left: 20px;
-            right: 20px;
-            background: rgba(0, 0, 0, 0.85);
-            color: #00ff00;
-            padding: 20px;
-            border: 2px solid #00ff00;
-            border-radius: 10px;
-            font-size: 18px;
-            z-index: 9999;
-            max-height: 90vh;
-            overflow-y: auto;
-            display: none;
-        }
-        #debug-overlay.show {
-            display: block;
-        }
-        .debug-line {
-            margin: 5px 0;
-            word-break: break-all;
-        }
-        .success { color: #00ff00; }
-        .error { color: #ff0000; }
-        .info { color: #00d9ff; }
-        .warning { color: #ffaa00; }
     </style>
     <script src="//www.gstatic.com/cast/sdk/libs/caf_receiver/v3/cast_receiver_framework.js"></script>
 </head>
 <body>
     <cast-media-player></cast-media-player>
-    <div id="debug-overlay"></div>
-    
     <script>
-        const debugOverlay = document.getElementById('debug-overlay');
-        let debugMessages = [];
-        
-        function addDebugMessage(message, type = 'info') {
-            const timestamp = new Date().toLocaleTimeString();
-            debugMessages.push(`<div class="debug-line ${type}">[${timestamp}] ${message}</div>`);
-            
-            if (debugMessages.length > 15) {
-                debugMessages.shift();
-            }
-            
-            debugOverlay.innerHTML = debugMessages.join('');
-            debugOverlay.classList.add('show');
-            
-            if (type === 'success') {
-                setTimeout(() => {
-                    debugOverlay.classList.remove('show');
-                }, 10000);
-            }
-        }
-        
         const context = cast.framework.CastReceiverContext.getInstance();
-        const playerManager = context.getPlayerManager();
         
-        addDebugMessage('🚀 Receiver started', 'success');
-
-        // Intercept LOAD requests
-        playerManager.setMessageInterceptor(
-            cast.framework.messages.MessageType.LOAD,
-            (loadRequestData) => {
-                addDebugMessage('📥 Load request', 'info');
-                
-                if (loadRequestData.media && loadRequestData.media.contentUrl) {
-                    let url = loadRequestData.media.contentUrl;
-                    addDebugMessage(`Original URL: ${url.substring(0, 100)}...`, 'info');
-                    
-                    let userAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36';
-                    
-                    // Parse pipe-separated headers
-                    if (url.includes('|')) {
-                        const parts = url.split('|');
-                        url = parts[0]; // Clean URL
-                        
-                        // Extract User-Agent if provided
-                        for (let i = 1; i < parts.length; i++) {
-                            if (parts[i].includes('User-Agent=')) {
-                                userAgent = parts[i].replace('User-Agent=', '');
-                                addDebugMessage(`✅ Extracted User-Agent`, 'success');
-                                break;
-                            }
-                        }
-                        
-                        addDebugMessage(`🧹 Cleaned URL`, 'info');
-                    }
-                    
-                    // Fix .0 extension
-                    const originalUrl = url;
-                    url = url.replace(/\.0\.(m3u8|ts|mp4)$/i, '.$1');
-                    
-                    if (originalUrl !== url) {
-                        addDebugMessage(`✨ Fixed .0 extension`, 'success');
-                    }
-                    
-                    addDebugMessage(`New URL: ${url.substring(url.lastIndexOf('/') + 1)}`, 'info');
-                    
-                    // Update URL
-                    loadRequestData.media.contentUrl = url;
-                    
-                    // Set content type
-                    if (url.includes('.m3u8') || url.includes('m3u8')) {
-                        loadRequestData.media.contentType = 'application/x-mpegURL';
-                        addDebugMessage('📺 Type: HLS (m3u8)', 'info');
-                    } else if (url.includes('.ts')) {
-                        loadRequestData.media.contentType = 'application/x-mpegURL';
-                        addDebugMessage('📺 Type: HLS (ts)', 'info');
-                    } else if (url.includes('.mp4')) {
-                        loadRequestData.media.contentType = 'video/mp4';
-                        addDebugMessage('📺 Type: MP4', 'info');
-                    }
-                    
-                    // CRITICAL: Apply User-Agent to the request
-                    if (!loadRequestData.media.customData) {
-                        loadRequestData.media.customData = {};
-                    }
-                    
-                    loadRequestData.media.customData.licenseCustomData = {
-                        'User-Agent': userAgent
-                    };
-                    
-                    addDebugMessage('✅ Applied User-Agent header', 'success');
-                    addDebugMessage('▶️ Ready to load stream', 'success');
-                }
-                
-                return loadRequestData;
-            }
-        );
+        // NO URL modifications - accept whatever comes in!
         
-        // Intercept segment requests to add headers
-        playerManager.setMediaPlaybackInfoHandler((loadRequest, playbackConfig) => {
-            playbackConfig.protectionSystem = cast.framework.ContentProtection.NONE;
-            
-            // Add User-Agent to all segment requests
-            if (loadRequest.media && loadRequest.media.customData && 
-                loadRequest.media.customData.licenseCustomData) {
-                
-                const userAgent = loadRequest.media.customData.licenseCustomData['User-Agent'];
-                
-                if (userAgent) {
-                    playbackConfig.licenseRequestHandler = (requestInfo) => {
-                        requestInfo.headers = requestInfo.headers || {};
-                        requestInfo.headers['User-Agent'] = userAgent;
-                        return requestInfo;
-                    };
-                    
-                    addDebugMessage('✅ User-Agent set for segments', 'success');
-                }
-            }
-            
-            return playbackConfig;
-        });
-
-        // Handle errors with more detail
-        playerManager.addEventListener(
-            cast.framework.events.EventType.ERROR,
-            (event) => {
-                let errorMsg = 'Unknown error';
-                
-                if (event.detailedErrorCode) {
-                    errorMsg = `Error ${event.detailedErrorCode}`;
-                    
-                    // Explain common errors
-                    if (event.detailedErrorCode === 301) {
-                        errorMsg += ' (Redirect/Auth issue)';
-                    } else if (event.detailedErrorCode === 906) {
-                        errorMsg += ' (Media load failed)';
-                    } else if (event.detailedErrorCode === 404) {
-                        errorMsg += ' (Stream not found)';
-                    }
-                }
-                
-                addDebugMessage(`❌ PLAYER ERROR: ${errorMsg}`, 'error');
-                
-                if (event.error && event.error.reason) {
-                    addDebugMessage(`Details: ${event.error.reason}`, 'error');
-                }
-            }
-        );
-
-        playerManager.addEventListener(
-            cast.framework.events.EventType.PLAYER_LOAD_COMPLETE,
-            () => {
-                addDebugMessage('✅ Player loaded!', 'success');
-            }
-        );
-
-        playerManager.addEventListener(
-            cast.framework.events.EventType.PLAYING,
-            () => {
-                addDebugMessage('🎬 PLAYBACK STARTED!', 'success');
-                
-                setTimeout(() => {
-                    debugOverlay.classList.remove('show');
-                }, 3000);
-            }
-        );
-        
-        playerManager.addEventListener(
-            cast.framework.events.EventType.BUFFERING,
-            () => {
-                addDebugMessage('⏳ Buffering...', 'warning');
-            }
-        );
-
-        // Start receiver
         const options = new cast.framework.CastReceiverOptions();
         options.maxInactivity = 3600;
-        options.disableIdleTimeout = false;
-        options.supportedCommands = cast.framework.messages.Command.ALL_BASIC_MEDIA;
         
         context.start(options);
     </script>
