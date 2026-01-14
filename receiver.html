@@ -7,25 +7,101 @@
             margin: 0;
             padding: 0;
             background-color: #000;
+            font-family: Arial, sans-serif;
         }
         cast-media-player {
             width: 100%;
             height: 100%;
         }
+        #debug {
+            position: fixed;
+            top: 20px;
+            left: 20px;
+            right: 20px;
+            background: rgba(0, 0, 0, 0.9);
+            color: #0f0;
+            padding: 15px;
+            border: 2px solid #0f0;
+            font-size: 16px;
+            z-index: 9999;
+            display: none;
+        }
+        #debug.show { display: block; }
+        .error { color: #f00; }
+        .success { color: #0f0; }
+        .info { color: #0ff; }
     </style>
     <script src="//www.gstatic.com/cast/sdk/libs/caf_receiver/v3/cast_receiver_framework.js"></script>
 </head>
 <body>
     <cast-media-player></cast-media-player>
+    <div id="debug"></div>
+    
     <script>
+        const debug = document.getElementById('debug');
+        let messages = [];
+        
+        function log(msg, type = 'info') {
+            const time = new Date().toLocaleTimeString();
+            messages.push(`<div class="${type}">[${time}] ${msg}</div>`);
+            if (messages.length > 10) messages.shift();
+            debug.innerHTML = messages.join('');
+            debug.classList.add('show');
+            
+            if (type === 'success') {
+                setTimeout(() => debug.classList.remove('show'), 5000);
+            }
+        }
+        
         const context = cast.framework.CastReceiverContext.getInstance();
+        const playerManager = context.getPlayerManager();
         
-        // Accept URLs as-is, no modifications
-        
+        log('🚀 Receiver ready', 'success');
+
+        // Log what URL we receive
+        playerManager.setMessageInterceptor(
+            cast.framework.messages.MessageType.LOAD,
+            (request) => {
+                if (request.media && request.media.contentUrl) {
+                    const url = request.media.contentUrl;
+                    log(`📥 URL: ${url.substring(url.lastIndexOf('/') + 1)}`, 'info');
+                    log(`📺 Type: ${request.media.contentType || 'auto'}`, 'info');
+                }
+                return request;
+            }
+        );
+
+        // Log errors with details
+        playerManager.addEventListener(
+            cast.framework.events.EventType.ERROR,
+            (event) => {
+                let msg = 'Unknown';
+                if (event.detailedErrorCode) {
+                    msg = `Error ${event.detailedErrorCode}`;
+                    if (event.detailedErrorCode === 301) msg += ' (Auth/Redirect)';
+                    if (event.detailedErrorCode === 311) msg += ' (Manifest error)';
+                    if (event.detailedErrorCode === 905) msg += ' (Decode error)';
+                    if (event.detailedErrorCode === 906) msg += ' (Load failed)';
+                }
+                log(`❌ ${msg}`, 'error');
+            }
+        );
+
+        playerManager.addEventListener(
+            cast.framework.events.EventType.PLAYER_LOAD_COMPLETE,
+            () => log('✅ Load complete', 'success')
+        );
+
+        playerManager.addEventListener(
+            cast.framework.events.EventType.PLAYING,
+            () => {
+                log('🎬 PLAYING!', 'success');
+                setTimeout(() => debug.classList.remove('show'), 3000);
+            }
+        );
+
         const options = new cast.framework.CastReceiverOptions();
         options.maxInactivity = 3600;
-        options.disableIdleTimeout = false;
-        
         context.start(options);
     </script>
 </body>
