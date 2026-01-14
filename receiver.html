@@ -20,10 +20,11 @@
     <script>
         const context = cast.framework.CastReceiverContext.getInstance();
         
-        // NO URL modifications - accept whatever comes in!
+        // Accept URLs as-is, no modifications
         
         const options = new cast.framework.CastReceiverOptions();
         options.maxInactivity = 3600;
+        options.disableIdleTimeout = false;
         
         context.start(options);
     </script>
